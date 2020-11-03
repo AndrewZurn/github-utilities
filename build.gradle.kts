@@ -12,6 +12,8 @@ repositories {
     maven { url = uri("https://kotlin.bintray.com/kotlinx") }
 }
 dependencies {
+    implementation("org.jetbrains.kotlin:kotlin-reflect")
+    implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8")
     implementation("org.kohsuke:github-api:1.116")
     implementation("org.jetbrains.kotlinx:kotlinx-cli:0.3")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.11.3")
