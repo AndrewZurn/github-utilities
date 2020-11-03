@@ -3,7 +3,7 @@ Uses the Github API to provide some useful utilities, such as analyzing pull req
 
 ## To Build
 Run `./gradlew packageDistribution`.
-This will build a jar for the application and move it to the `dist/lib/` directory.
+This will build a jar for the application and move it and a bash script to execute it to the `dist` directory.
 
 ## To Run
 Once you've built the app, you can execute it from the `dist/` directory.

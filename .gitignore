@@ -180,5 +180,5 @@ gradle-app.setting
 
 # End of https://www.toptal.com/developers/gitignore/api/kotlin,java,gradle,intellij,linux
 
-# ignore the dist directory jars
-dist/lib
+# ignore the dist directory
+dist
