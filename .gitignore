@@ -180,5 +180,6 @@ gradle-app.setting
 
 # End of https://www.toptal.com/developers/gitignore/api/kotlin,java,gradle,intellij,linux
 
-# ignore the dist directory
+# ignore the dist directory and other generated executables
 dist
+github-utilities-native

@@ -22,17 +22,17 @@ private val JsonMapper = jacksonObjectMapper()
 
 fun analyze(PRType: String, PRPullLimit: Int, repoName: String, outputType: String) {
     val github = GitHubBuilder.fromEnvironment().build()
-    val partnerApiRepo = github.getRepository(repoName).queryPullRequests()
+    val repo = github.getRepository(repoName).queryPullRequests()
 
     if (PRType.equals(OpenPRType, ignoreCase = true)) {
-        handleOpenPrAnalysis(partnerApiRepo, PRPullLimit, outputType)
+        handleOpenPrAnalysis(repo, PRPullLimit, outputType)
     } else {
-        handleMergedPrAnalysis(partnerApiRepo, PRPullLimit, outputType)
+        handleMergedPrAnalysis(repo, PRPullLimit, outputType)
     }
 }
 
 private fun handleMergedPrAnalysis(
-    partnerApiRepo: GHPullRequestQueryBuilder,
+    repoName: GHPullRequestQueryBuilder,
     PRPullLimit: Int,
     outputType: String
 ) {
@@ -46,7 +46,7 @@ private fun handleMergedPrAnalysis(
 
     // get PRs that were successfully merged
     val mergedPRs =
-        partnerApiRepo.state(GHIssueState.CLOSED).list().take(PRPullLimit).filter { it.mergedAt != null }
+        repoName.state(GHIssueState.CLOSED).list().take(PRPullLimit).filter { it.mergedAt != null }
     val timeToMergeDurations = mergedPRs.map {
         Duration.between(
             it.createdAt.toInstant().atZone(ZoneOffset.UTC).toLocalDateTime(),
@@ -62,24 +62,24 @@ private fun handleMergedPrAnalysis(
     }
 
     val averageTimeToFirstReview =
-        Duration.ofSeconds(timeToFirstReviewDurations.map { it.toSeconds() }.sum() / mergedPRs.count())
-    val averageTimeToMerge = Duration.ofSeconds(timeToMergeDurations.map { it.toSeconds() }.sum() / mergedPRs.count())
+        Duration.ofSeconds(timeToFirstReviewDurations.map { it.seconds }.sum() / mergedPRs.count())
+    val averageTimeToMerge = Duration.ofSeconds(timeToMergeDurations.map { it.seconds }.sum() / mergedPRs.count())
 
     if (outputType.equals(JsonOutputType, ignoreCase = true)) {
         // yes this could be a function to make it a little less redundant... oh well
         val json = JsonMapper.writeValueAsString(
             mapOf(
                 "average" to mapOf(
-                    "firstReview" to averageTimeToFirstReview.toSeconds(),
-                    "merge" to averageTimeToMerge.toSeconds()
+                    "firstReview" to averageTimeToFirstReview.seconds,
+                    "merge" to averageTimeToMerge.seconds
                 ),
                 "max" to mapOf(
-                    "firstReview" to timeToFirstReviewDurations.maxOrNull()!!.toSeconds(),
-                    "merge" to timeToMergeDurations.maxOrNull()!!.toSeconds()
+                    "firstReview" to timeToFirstReviewDurations.maxOrNull()!!.seconds,
+                    "merge" to timeToMergeDurations.maxOrNull()!!.seconds
                 ),
                 "min" to mapOf(
-                    "firstReview" to timeToFirstReviewDurations.minOrNull()!!.toSeconds(),
-                    "merge" to timeToMergeDurations.minOrNull()!!.toSeconds()
+                    "firstReview" to timeToFirstReviewDurations.minOrNull()!!.seconds,
+                    "merge" to timeToMergeDurations.minOrNull()!!.seconds
                 )
             )
         )
@@ -92,13 +92,13 @@ private fun handleMergedPrAnalysis(
 }
 
 private fun handleOpenPrAnalysis(
-    partnerApiRepo: GHPullRequestQueryBuilder,
+    nerApiRepo: GHPullRequestQueryBuilder,
     PRPullLimit: Int,
     outputType: String
 ) {
     if (outputType.equals(TextOutputType, ignoreCase = true)) println("Open PRs\nWorking...")
 
-    val openPRs = partnerApiRepo.state(GHIssueState.OPEN).list().take(PRPullLimit)
+    val openPRs = nerApiRepo.state(GHIssueState.OPEN).list().take(PRPullLimit)
     if (outputType.equals(JsonOutputType, ignoreCase = true)) {
         val json = JsonMapper.writeValueAsString(openPRs.map {
             mapOf(
@@ -130,10 +130,10 @@ fun main(args: Array<String>) {
     val pullRequestPullLimit by parser.option(
         ArgType.Int,
         fullName = "pr-limit",
-        shortName = "c",
+        shortName = "l",
         description = "Limit the amount of PRs to analyze."
     ).default(10)
-    val repositoryName by parser.option(
+    val repoName by parser.option(
         ArgType.String,
         fullName = "repo-name",
         shortName = "r",
@@ -153,6 +153,13 @@ fun main(args: Array<String>) {
     if (!AllowedOutputTypes.contains(outputType.toUpperCase())) {
         throw RuntimeException("--output parameter must be of value ${AllowedOutputTypes}")
     }
-
-    analyze(analyzePRType, pullRequestPullLimit, repositoryName, outputType)
+    analyze(analyzePRType, pullRequestPullLimit, repoName, outputType)
 }
+
+// not in Java 8, thus implementing directly
+// https://docs.oracle.com/javase/9/docs/api/java/time/Duration.html#toHoursPart--
+fun Duration.toHoursPart(): Long = this.toHours() % 24L
+
+// not in Java 8, thus implementing directly
+// https://docs.oracle.com/javase/9/docs/api/java/time/Duration.html#toMinutesPart--
+fun Duration.toMinutesPart(): Long = this.toMinutes() % 60L

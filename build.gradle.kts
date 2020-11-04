@@ -1,4 +1,5 @@
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+import org.jetbrains.kotlin.konan.util.visibleName
 
 plugins {
     kotlin("jvm") version "1.4.10"
@@ -20,7 +21,7 @@ dependencies {
     testImplementation(kotlin("test-junit5"))
 }
 tasks.withType<KotlinCompile>() {
-    kotlinOptions.jvmTarget = "11"
+    kotlinOptions.jvmTarget = "1.8"
 }
 application {
     mainClassName = "MainKt"

@@ -20,3 +20,12 @@ Example - Print in JSON
 ```
 github-utilities/dist> ./github-utilities --output json --analyze open --pr-limit 5 --repo-name <your-repo-name>
 ```
+
+## To Build Graal Native Image
+You will need to install GraalVM (Java 11 CE edition) and install the `native-image` utility. Follow directions here: https://www.graalvm.org/examples/java-kotlin-aot, then to build
+the actual application native-image:
+```
+./build-graal-image.sh
+```
+
+This will produce an executable called `github-utilities-native` that can be executed using similar commands from above.
