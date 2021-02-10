@@ -4,6 +4,7 @@ import kotlinx.cli.ArgType
 import kotlinx.cli.default
 import kotlinx.cli.required
 import org.kohsuke.github.GHIssueState
+import org.kohsuke.github.GHLabel
 import org.kohsuke.github.GHPullRequestQueryBuilder
 import org.kohsuke.github.GitHubBuilder
 import java.lang.RuntimeException
@@ -36,17 +37,15 @@ private fun handleMergedPrAnalysis(
     PRPullLimit: Int,
     outputType: String
 ) {
-    fun printMergeStats(prefix: String, firstReviewDuration: Duration, mergeDuration: Duration) {
-        println("${prefix} Time to First Review: ${firstReviewDuration.toDays()} days, ${firstReviewDuration.toHoursPart()} hours, ${firstReviewDuration.toMinutesPart()} minutes.")
-        println("${prefix} Time to Merge: ${mergeDuration.toDays()} days, ${mergeDuration.toHoursPart()} hours, ${mergeDuration.toMinutesPart()} minutes.")
-    }
-
     if (outputType.equals(TextOutputType, ignoreCase = true))
         println("\nClosed PR Statistics (limit ${PRPullLimit})\nWorking...")
 
     // get PRs that were successfully merged
-    val mergedPRs =
-        partnerApiRepo.state(GHIssueState.CLOSED).list().take(PRPullLimit).filter { it.mergedAt != null }
+    val mergedPRs = partnerApiRepo.state(GHIssueState.CLOSED)
+        .list()
+        .take(PRPullLimit)
+        .filter { it.mergedAt != null }
+        .filter { it.labels.map { label -> label.name }.contains("exclude-from-analysis").not() }
     val timeToMergeDurations = mergedPRs.map {
         Duration.between(
             it.createdAt.toInstant().atZone(ZoneOffset.UTC).toLocalDateTime(),
@@ -59,6 +58,12 @@ private fun handleMergedPrAnalysis(
             it.createdAt.toInstant().atZone(ZoneOffset.UTC).toLocalDateTime(),
             firstReviewTime
         )
+    }
+
+    // return early as we don't have any PRs to analyze
+    if (mergedPRs.count() == 0) {
+        println("No PRs found to analyze.")
+        return
     }
 
     val averageTimeToFirstReview =
@@ -89,6 +94,11 @@ private fun handleMergedPrAnalysis(
         printMergeStats("Max", timeToFirstReviewDurations.maxOrNull()!!, timeToMergeDurations.maxOrNull()!!)
         printMergeStats("Min", timeToFirstReviewDurations.minOrNull()!!, timeToMergeDurations.minOrNull()!!)
     }
+}
+
+private fun printMergeStats(prefix: String, firstReviewDuration: Duration, mergeDuration: Duration) {
+    println("${prefix} Time to First Review: ${firstReviewDuration.toDays()} days, ${firstReviewDuration.toHoursPart()} hours, ${firstReviewDuration.toMinutesPart()} minutes.")
+    println("${prefix} Time to Merge: ${mergeDuration.toDays()} days, ${mergeDuration.toHoursPart()} hours, ${mergeDuration.toMinutesPart()} minutes.")
 }
 
 private fun handleOpenPrAnalysis(
@@ -130,7 +140,7 @@ fun main(args: Array<String>) {
     val pullRequestPullLimit by parser.option(
         ArgType.Int,
         fullName = "pr-limit",
-        shortName = "c",
+        shortName = "l",
         description = "Limit the amount of PRs to analyze."
     ).default(10)
     val repositoryName by parser.option(
