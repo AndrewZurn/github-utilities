@@ -5,9 +5,9 @@ import kotlinx.cli.default
 import kotlinx.cli.required
 import org.kohsuke.github.GHIssueState
 import org.kohsuke.github.GHPullRequest
+import org.kohsuke.github.GHPullRequestReviewState
 import org.kohsuke.github.GHRepository
 import org.kohsuke.github.GitHubBuilder
-import java.lang.RuntimeException
 import java.time.Duration
 import java.time.LocalDateTime
 import java.time.ZoneOffset
@@ -55,7 +55,8 @@ private fun handleMergedPrAnalysis(
     val timeToFirstReviewDurations = mergedPRs.map {
         val reviews = it.listReviews()
         if (reviews.any()) { // if a PR didn't have a review but was merged
-            val firstReviewTime = reviews.first().createdAt.toInstant().atZone(ZoneOffset.UTC).toLocalDateTime()
+            val firstReview = reviews.first { it.state != GHPullRequestReviewState.PENDING }
+            val firstReviewTime = firstReview.createdAt.toInstant().atZone(ZoneOffset.UTC).toLocalDateTime()
             Duration.between(
                 it.createdAt.toInstant().atZone(ZoneOffset.UTC).toLocalDateTime(),
                 firstReviewTime
