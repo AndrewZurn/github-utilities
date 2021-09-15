@@ -41,17 +41,21 @@ private fun handleMergedPrAnalysis(
         println("\nClosed PR Statistics (limit ${PRPullLimit})\nWorking...")
 
     // get PRs that were successfully merged
+    println("Gathering merged PRs...")
     val mergedPRs = repo.queryPullRequests().state(GHIssueState.CLOSED)
         .list()
         .take(PRPullLimit)
         .filter { it.mergedAt != null }
         .filter { it.labels.map { label -> label.name }.contains("exclude-from-analysis").not() }
+
     val timeToMergeDurations = mergedPRs.map {
         Duration.between(
             it.createdAt.toInstant().atZone(ZoneOffset.UTC).toLocalDateTime(),
             it.mergedAt.toInstant().atZone(ZoneOffset.UTC).toLocalDateTime()
         )
     }
+
+    println("Gathering time to first review durations...")
     val timeToFirstReviewDurations = mergedPRs.map {
         val reviews = it.listReviews()
         if (reviews.any()) { // if a PR didn't have a review but was merged
@@ -66,17 +70,15 @@ private fun handleMergedPrAnalysis(
         }
     }.filterNotNull()
 
-    // return early as we don't have any PRs to analyze
-    if (mergedPRs.count() == 0) {
-        println("No PRs found to analyze.")
-        return
-    }
-
+    println("Analyzing average time to first review...")
     val averageTimeToFirstReview =
         Duration.ofSeconds(timeToFirstReviewDurations.map { it.seconds }.sum() / mergedPRs.count())
+    println("Analyzing average time to merge...")
     val averageTimeToMerge = Duration.ofSeconds(timeToMergeDurations.map { it.seconds }.sum() / mergedPRs.count())
-    val repoContributors = repo.listContributors().map { it.login }
-    val individualContributorStats = if (includeIndividualStats) getIndividualStatistics(repoContributors, mergedPRs) else emptyList()
+
+    val individualContributorStats =
+        if (includeIndividualStats) getIndividualStatistics(repo.listContributors().map { it.login }, mergedPRs)
+        else emptyList()
 
     if (outputType.equals(JsonOutputType, ignoreCase = true)) {
         // yes this could be a function to make it a little less redundant... oh well
@@ -124,17 +126,19 @@ private fun printMergeStats(prefix: String, firstReviewDuration: Duration, merge
 }
 
 private fun getIndividualStatistics(contributorNames: List<String>, prs: List<GHPullRequest>): List<ContributorStats> {
+    println("Gathering individual contributor statistics...")
     val prsWithReviews = prs.map { it to it.listReviews() }
-    return contributorNames.map { collaboratorName ->
+    return contributorNames.map { contributorName ->
+        println("Gather statistics for: $contributorName")
         val prReviewResult = prsWithReviews.map { pr ->
-            val didReview = pr.second.any { ghPrReview -> ghPrReview.user.login.equals(collaboratorName) }
-            val wasRequested = pr.first.requestedReviewers.map { it.login }.contains(collaboratorName)
+            val didReview = pr.second.any { ghPrReview -> ghPrReview.user.login.equals(contributorName) }
+            val wasRequested = pr.first.requestedReviewers.map { it.login }.contains(contributorName)
             didReview to wasRequested
         }
         ContributorStats(
-            collaboratorName,
-            prReviewResult.filter { it.first }.count(),
-            prReviewResult.filter { it.second }.count()
+            author = contributorName,
+            submittedReviews = prReviewResult.filter { it.first }.count(),
+            wasRequestedReviews = prReviewResult.filter { it.second }.count()
         )
     }
 }
