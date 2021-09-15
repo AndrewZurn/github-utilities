@@ -113,8 +113,8 @@ private fun handleMergedPrAnalysis(
         individualContributorStats.filter { it.wasRequestedReviews > 0 || it.submittedReviews > 0 }.map {
             println(
                 "Contributor Stats - Name: ${it.author} " +
-                "- Submitted Reviews: ${it.submittedReviews} " +
-                "- Was Requested Review: ${it.wasRequestedReviews}"
+                    "- Submitted Reviews: ${it.submittedReviews} " +
+                    "- Was Requested Review: ${it.wasRequestedReviews}"
             )
         }
     }
@@ -128,17 +128,32 @@ private fun printMergeStats(prefix: String, firstReviewDuration: Duration, merge
 private fun getIndividualStatistics(contributorNames: List<String>, prs: List<GHPullRequest>): List<ContributorStats> {
     println("Gathering individual contributor statistics...")
     val prsWithReviews = prs.map { it to it.listReviews() }
-    return contributorNames.map { contributorName ->
-        println("Gather statistics for: $contributorName")
-        val prReviewResult = prsWithReviews.map { pr ->
-            val didReview = pr.second.any { ghPrReview -> ghPrReview.user.login.equals(contributorName) }
-            val wasRequested = pr.first.requestedReviewers.map { it.login }.contains(contributorName)
-            didReview to wasRequested
+
+    // Let's Map/Reduce (although a bit clunky with the Kotlin mechanics...)
+    // For each PR get the flattened list of contributors, group by each contributor name, then count the
+    // number of times their name occurred as having submitted a review to a PR.
+    val contributorsToPrs = prsWithReviews
+        .flatMap { pr ->
+            pr.second
+                .flatMap { review -> contributorNames.mapNotNull { if (it.contains(review.user.login)) it else null } }
+                .distinct() // ensure that if someone submitted multiple reviews in a PR they're numbers arn't skewed
         }
+        .groupBy { it }
+        .mapValues { it.key to it.value.count() }
+
+    // For each PR, get the flattened list of requested reviewers, group by each contributor name,
+    // then count the number of times their name occurred as having been asked for a review.
+    val wasRequestedToReviewPr = prsWithReviews
+        .flatMap { pr -> pr.first.requestedReviewers.map { it.login } }
+        .groupBy { it }
+        .mapValues { it.key to it.value.count() }
+
+    return contributorNames.map { contributorName ->
+        println("Generating statistics for: $contributorName")
         ContributorStats(
             author = contributorName,
-            submittedReviews = prReviewResult.filter { it.first }.count(),
-            wasRequestedReviews = prReviewResult.filter { it.second }.count()
+            submittedReviews = contributorsToPrs[contributorName]?.second ?: 0,
+            wasRequestedReviews = wasRequestedToReviewPr[contributorName]?.second ?: 0
         )
     }
 }
@@ -207,10 +222,10 @@ fun main(args: Array<String>) {
     ).default(false)
     parser.parse(args)
 
-    if (!AllowedAnalysisTypes.contains(analyzePRType.toUpperCase())) {
+    if (!AllowedAnalysisTypes.contains(analyzePRType.uppercase())) {
         throw RuntimeException("--analyze parameter must be of value ${AllowedAnalysisTypes}")
     }
-    if (!AllowedOutputTypes.contains(outputType.toUpperCase())) {
+    if (!AllowedOutputTypes.contains(outputType.uppercase())) {
         throw RuntimeException("--output parameter must be of value ${AllowedOutputTypes}")
     }
 
