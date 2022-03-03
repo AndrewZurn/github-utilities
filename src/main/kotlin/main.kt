@@ -14,7 +14,8 @@ import java.time.ZoneOffset
 
 private const val OpenPRType = "OPEN"
 private const val MergedPRType = "MERGED"
-private val AllowedAnalysisTypes = listOf(OpenPRType, MergedPRType)
+private const val CodeReviewReportType = "CODEREVIEW"
+private val AllowedAnalysisTypes = listOf(OpenPRType, MergedPRType, CodeReviewReportType)
 private const val TextOutputType = "TEXT"
 private const val JsonOutputType = "JSON"
 private val AllowedOutputTypes = listOf(TextOutputType, JsonOutputType)
@@ -22,13 +23,49 @@ private val AllowedOutputTypes = listOf(TextOutputType, JsonOutputType)
 private val JsonMapper = jacksonObjectMapper()
 
 fun analyze(PRType: String, prPullLimit: Int, repoName: String, outputType: String, includeIndividualStats: Boolean) {
-    val github = GitHubBuilder.fromEnvironment().build()
-    val repo = github.getRepository(repoName)
+    val repo = getGithubRepo(repoName)
     if (PRType.equals(OpenPRType, ignoreCase = true)) {
         handleOpenPrAnalysis(repo, prPullLimit, outputType)
     } else {
         handleMergedPrAnalysis(repo, prPullLimit, outputType, includeIndividualStats)
     }
+}
+
+private fun getGithubRepo(repoName: String): GHRepository {
+    val github = GitHubBuilder.fromEnvironment().build()
+    return github.getRepository(repoName)
+}
+
+private fun getCodeReviewReportInfo(
+    ticketsInReport: List<String>,
+    PRPullLimit: Int,
+    repoName: String,
+    outputType: String
+) {
+    println("Code Review Report PR Printout")
+    println("Gathering PRs, finding authors and changed files for list ${ticketsInReport.joinToString(", ")}...")
+    val repo = getGithubRepo(repoName)
+    repo.queryPullRequests().state(GHIssueState.CLOSED)
+        .list()
+        .take(PRPullLimit)
+        .map { pr ->
+            ticketsInReport
+                .find { ticket -> pr.title.contains(ticket, ignoreCase = true) }
+                ?.let { ticket -> ticket to pr } // keep the ticket num to the PR instance to allow for easier formatting later on
+        }
+        .filterNotNull()
+        .forEach { (ticket, pr) ->
+            val filesChanged = pr.listFiles().map { file ->
+                if (file.previousFilename != null) "${file.previousFilename} -> ${file.filename}"
+                else file.filename
+            }
+
+            println("Ticket: ${ticket}")
+            println("Reviewers: ${pr.listReviews().joinToString(", ") { it.user.login }}")
+            println("Files Changed:")
+            println(filesChanged.joinToString("\r\n"))
+            println("====================")
+        }
 }
 
 private fun handleMergedPrAnalysis(
@@ -112,7 +149,7 @@ private fun handleMergedPrAnalysis(
         printMergeStats("Min", timeToFirstReviewDurations.minOrNull()!!, timeToMergeDurations.minOrNull()!!)
         individualContributorStats.filter { it.wasRequestedReviews > 0 || it.submittedReviews > 0 }.map {
             println(
-                "Contributor Stats - Name: ${it.author} " +
+                "Name: ${it.author} " +
                     "- Submitted Reviews: ${it.submittedReviews} " +
                     "- Was Requested Review: ${it.wasRequestedReviews}"
             )
@@ -190,7 +227,7 @@ private fun handleOpenPrAnalysis(repo: GHRepository, PRPullLimit: Int, outputTyp
 
 fun main(args: Array<String>) {
     val parser = ArgParser("Github PR Utility")
-    val analyzePRType by parser.option(
+    val analysisType by parser.option(
         ArgType.String,
         fullName = "analyze",
         shortName = "a",
@@ -220,14 +257,26 @@ fun main(args: Array<String>) {
         shortName = "i",
         description = "Should include statistics on each individual contributor."
     ).default(false)
+    val ticketsInReport by parser.option(
+        ArgType.String,
+        fullName = "tickets",
+        shortName = "t",
+        description = "The a comma-separated list of tickets to be included in the code review report printout."
+    )
     parser.parse(args)
 
-    if (!AllowedAnalysisTypes.contains(analyzePRType.uppercase())) {
+    if (!AllowedAnalysisTypes.contains(analysisType.uppercase())) {
         throw RuntimeException("--analyze parameter must be of value ${AllowedAnalysisTypes}")
     }
     if (!AllowedOutputTypes.contains(outputType.uppercase())) {
         throw RuntimeException("--output parameter must be of value ${AllowedOutputTypes}")
     }
 
-    analyze(analyzePRType, pullRequestPullLimit, repositoryName, outputType, includeIndividualStats)
+    if (analysisType.equals(CodeReviewReportType, ignoreCase = true)) {
+        if (ticketsInReport == null)
+            throw RuntimeException("--tickets can not be empty when doing a Code Review Report printout.")
+        getCodeReviewReportInfo(ticketsInReport!!.split(","), pullRequestPullLimit, repositoryName, outputType)
+    } else {
+        analyze(analysisType, pullRequestPullLimit, repositoryName, outputType, includeIndividualStats)
+    }
 }
