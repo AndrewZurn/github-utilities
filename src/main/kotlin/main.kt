@@ -15,6 +15,10 @@ private const val TextOutputType = "TEXT"
 private const val JsonOutputType = "JSON"
 private val AllowedOutputTypes = listOf(TextOutputType, JsonOutputType)
 
+private const val WORKSTARTTIME = 8  // Assuming start day at 8 am
+private const val WORKENDTIME = 18  // End at 6 pm
+private const val PRINTOUTPUTMESSAGES = false
+
 private val JsonMapper = jacksonObjectMapper()
 
 fun analyze(PRType: String, prPullLimit: Int, repoName: String, outputType: String, includeIndividualStats: Boolean) {
@@ -81,10 +85,9 @@ private fun handleMergedPrAnalysis(
         .filter { it.labels.map { label -> label.name }.contains("exclude-from-analysis").not() }
 
     val timeToMergeDurations = mergedPRs.map {
-        //calcDurationWithoutWeekends(
-        Duration.between(
-            it.createdAt.toInstant().atZone(ZoneOffset.UTC).toLocalDateTime(),
-            it.mergedAt.toInstant().atZone(ZoneOffset.UTC).toLocalDateTime(),
+        calcDurationWithoutWeekends(
+            it.createdAt.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime(),
+            it.mergedAt.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime(),
         )
     }
 
@@ -93,10 +96,9 @@ private fun handleMergedPrAnalysis(
         val reviews = it.listReviews()
         if (reviews.any()) { // if a PR didn't have a review but was merged
             val firstReview = reviews.first { it.state != GHPullRequestReviewState.PENDING }
-            val firstReviewTime = firstReview.createdAt.toInstant().atZone(ZoneOffset.UTC).toLocalDateTime()
-            //calcDurationWithoutWeekends(
-            Duration.between(
-                it.createdAt.toInstant().atZone(ZoneOffset.UTC).toLocalDateTime(),
+            val firstReviewTime = firstReview.createdAt.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime()
+            calcDurationWithoutWeekends(
+               it.createdAt.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime(),
                 firstReviewTime
             )
         } else {
@@ -153,58 +155,77 @@ private fun handleMergedPrAnalysis(
         }
     }
 }
+/*
+ Given a Local DateTime, normalizes the Date into the work time between WORKSTARTTIME and WORKENDTIME, excluding weekends.
 
+ If the date falls outside the workday window, the normalized date will be the start of the next working day.
+ */
+private fun getWorkHourDate(someDate:LocalDateTime) : LocalDateTime
+{
+    var normalizedLocalDateTime : LocalDateTime = someDate
 
+    if ( someDate.hour < WORKSTARTTIME) {
+        normalizedLocalDateTime = LocalDateTime.of(LocalDate.of(someDate.year, someDate.month, someDate.dayOfMonth), LocalTime.of(WORKSTARTTIME,0))
+    }
+    if ( someDate.hour >= WORKENDTIME) {
+        val tomorrowDate = someDate.plusDays(1);
+        normalizedLocalDateTime = LocalDateTime.of(LocalDate.of(tomorrowDate.year, tomorrowDate.month, tomorrowDate.dayOfMonth), LocalTime.of(WORKSTARTTIME,0))
+    }
+
+    // If start on a weekend, move to first moment of Monday.
+    if (normalizedLocalDateTime.dayOfWeek.equals(DayOfWeek.SATURDAY))
+        normalizedLocalDateTime = normalizedLocalDateTime.plusDays(2).toLocalDate().atStartOfDay()
+    if (normalizedLocalDateTime.dayOfWeek.equals(DayOfWeek.SUNDAY))
+        normalizedLocalDateTime = normalizedLocalDateTime.plusDays(1).toLocalDate().atStartOfDay()
+
+    return normalizedLocalDateTime
+}
 
 private fun calcDurationWithoutWeekends(startLocalDateTime: LocalDateTime, endLocalDateTime: LocalDateTime) : Duration {
-    val boolPrint = true; // set to false for less chattiness
-    val formatter: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMddHH");
 
-    var start: LocalDateTime = LocalDateTime.parse(startLocalDateTime.format(formatter), formatter);
-    // If start on a weekend, move to first moment of Monday.
-    if (startLocalDateTime.dayOfWeek.equals(DayOfWeek.SATURDAY))
-        start = start.plusDays(2).toLocalDate().atStartOfDay()
-    if (start.dayOfWeek.equals(DayOfWeek.SUNDAY))
-        start = start.plusDays(1).toLocalDate().atStartOfDay()
+    val formatter: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMddHH")
 
-    if (boolPrint) { println("Start is "+start) }
+    var start: LocalDateTime = getWorkHourDate(startLocalDateTime)
 
-    var stop: LocalDateTime = LocalDateTime.parse(endLocalDateTime.format(formatter), formatter);
-    // If stop on a weekend, move to first moment of Monday.
-    if (stop.dayOfWeek.equals(DayOfWeek.SATURDAY))
-        stop = stop.plusDays(2).toLocalDate().atStartOfDay()
-    if (stop.dayOfWeek.equals(DayOfWeek.SUNDAY))
-        stop = stop.plusDays(1).toLocalDate().atStartOfDay()
+    if (PRINTOUTPUTMESSAGES) { println("Start is "+startLocalDateTime) }
+    if (PRINTOUTPUTMESSAGES) { println("Normalized Start is "+start) }
 
-    if (boolPrint) { println("Stop is "+stop)}
+    var stop: LocalDateTime = getWorkHourDate(endLocalDateTime)
+
+    if (PRINTOUTPUTMESSAGES) { println("Stop is "+endLocalDateTime)}
+    if (PRINTOUTPUTMESSAGES) { println("Normalized Stop is "+stop) }
 
     if ((start.isEqual(stop))||(start.isAfter(stop))) { // error states, no calc to do
-        0;
+        0
+    }
+
+    if (start.toLocalDate().equals(stop.toLocalDate())) {
+        if (PRINTOUTPUTMESSAGES) { println("hourly duration is "+Duration.between(start,stop))}
+        return Duration.between(start,stop)
     }
 
     val firstMomentOfDayAfterStart = start.toLocalDate().plusDays(1).atStartOfDay()
-    val firstDayDuration = Duration.between(start, firstMomentOfDayAfterStart)
-    if (boolPrint) { println("firstDayDuration is "+firstDayDuration)}
-    val firstMomentOfDayAfterStop = stop.toLocalDate().plusDays(1).atStartOfDay()
-    val lastDayDuration = Duration.between(stop, firstMomentOfDayAfterStop)
-    if (boolPrint) { println("lastDayDuration is "+lastDayDuration)}
+    val firstDayDuration = Duration.between(start, LocalDateTime.of(LocalDate.of(start.year, start.month, start.dayOfMonth), LocalTime.of(WORKENDTIME,0)))
+    if (PRINTOUTPUTMESSAGES) { println("firstDayDuration is "+firstDayDuration)}
+    val lastDayDuration = Duration.between(LocalDateTime.of(LocalDate.of(stop.year, stop.month, stop.dayOfMonth), LocalTime.of(WORKSTARTTIME,0)), stop)
+    if (PRINTOUTPUTMESSAGES) { println("lastDayDuration is "+lastDayDuration)}
 
     var countWeekdays : Long = 0;
     var firstMomentOfSomeDay = firstMomentOfDayAfterStart;
-    while( firstMomentOfSomeDay.isBefore( firstMomentOfDayAfterStop ) ) {
+    while( firstMomentOfSomeDay.toLocalDate().isBefore( stop.toLocalDate() ) ) {
         var dayOfWeek = firstMomentOfSomeDay.getDayOfWeek();
         if( dayOfWeek.equals( DayOfWeek.SATURDAY ) || dayOfWeek.equals( DayOfWeek.SUNDAY ) ) {
             // ignore this day.
         } else {
-            countWeekdays ++ ; // Tally another weekday.
+            countWeekdays ++  // Tally another weekday.
         }
         // Set up the next loop.
-        firstMomentOfSomeDay = firstMomentOfSomeDay.plusDays( 1 );
+        firstMomentOfSomeDay = firstMomentOfSomeDay.plusDays( 1 )
     }
-    if (boolPrint) { println("count of middle days is "+countWeekdays)}
-    if (boolPrint) { println("total duration is "+firstDayDuration.toString() + Duration.ofDays(countWeekdays) + lastDayDuration.toString())}
+    if (PRINTOUTPUTMESSAGES) { println("count of middle days is "+countWeekdays)}
+    if (PRINTOUTPUTMESSAGES) { println("total duration is "+firstDayDuration.toString() + Duration.ofDays(countWeekdays) + lastDayDuration.toString())}
 
-    return firstDayDuration + Duration.ofDays(countWeekdays) + lastDayDuration
+    return firstDayDuration + Duration.ofHours(countWeekdays*8) + lastDayDuration
 }
 
 
@@ -267,10 +288,9 @@ private fun handleOpenPrAnalysis(repo: GHRepository, PRPullLimit: Int, outputTyp
         println(json)
     } else {
         openPRs.forEach {
-            val openDuration = //calcDurationWithoutWeekends(
-                Duration.between(
-                    it.createdAt.toInstant().atZone(ZoneOffset.UTC).toLocalDateTime(),
-                    LocalDateTime.now(ZoneOffset.UTC)
+            val openDuration = calcDurationWithoutWeekends(
+                    it.createdAt.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime(),
+                    LocalDateTime.now(ZoneId.systemDefault())
                 )
             println("PR: ${it.number} ${it.title} has been open for ${openDuration.toDays()} days, ${openDuration.toHoursPart()} hours.")
         }
