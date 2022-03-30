@@ -7,23 +7,22 @@ import org.kohsuke.github.*
 import java.time.*
 import java.time.format.DateTimeFormatter
 
-private const val OpenPRType = "OPEN"
-private const val MergedPRType = "MERGED"
-private const val CodeReviewReportType = "CODEREVIEW"
-private val AllowedAnalysisTypes = listOf(OpenPRType, MergedPRType, CodeReviewReportType)
-private const val TextOutputType = "TEXT"
-private const val JsonOutputType = "JSON"
-private val AllowedOutputTypes = listOf(TextOutputType, JsonOutputType)
+private const val OPEN_PR_TYPE = "OPEN"
+private const val MERGED_PR_TYPE = "MERGED"
+private const val CODE_REVIEW_REPORT_TYPE = "CODEREVIEW"
+private val ALLOWED_ANALYSIS_TYPES = listOf(OPEN_PR_TYPE, MERGED_PR_TYPE, CODE_REVIEW_REPORT_TYPE)
+private const val TEXT_OUTPUT_TYPE = "TEXT"
+private const val JSON_OUTPUT_TYPE = "JSON"
+private val ALLOWED_OUTPUT_TYPES = listOf(TEXT_OUTPUT_TYPE, JSON_OUTPUT_TYPE)
 
-private const val WORKSTARTTIME = 8  // Assuming start day at 8 am
-private const val WORKENDTIME = 18  // End at 6 pm
-private const val PRINTOUTPUTMESSAGES = false
+private const val WORK_START_TIME = 8  // Assuming start day at 8 am
+private const val WORK_END_TIME = 18  // End at 6 pm
 
 private val JsonMapper = jacksonObjectMapper()
 
 fun analyze(PRType: String, prPullLimit: Int, repoName: String, outputType: String, includeIndividualStats: Boolean) {
     val repo = getGithubRepo(repoName)
-    if (PRType.equals(OpenPRType, ignoreCase = true)) {
+    if (PRType.equals(OPEN_PR_TYPE, ignoreCase = true)) {
         handleOpenPrAnalysis(repo, prPullLimit, outputType)
     } else {
         handleMergedPrAnalysis(repo, prPullLimit, outputType, includeIndividualStats)
@@ -73,7 +72,7 @@ private fun handleMergedPrAnalysis(
     outputType: String,
     includeIndividualStats: Boolean
 ) {
-    if (outputType.equals(TextOutputType, ignoreCase = true))
+    if (outputType.equals(TEXT_OUTPUT_TYPE, ignoreCase = true))
         println("\nClosed PR Statistics (limit ${PRPullLimit})\nWorking...")
 
     // get PRs that were successfully merged
@@ -98,7 +97,7 @@ private fun handleMergedPrAnalysis(
             val firstReview = reviews.first { it.state != GHPullRequestReviewState.PENDING }
             val firstReviewTime = firstReview.createdAt.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime()
             calcDurationWithoutWeekends(
-               it.createdAt.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime(),
+                it.createdAt.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime(),
                 firstReviewTime
             )
         } else {
@@ -116,7 +115,7 @@ private fun handleMergedPrAnalysis(
         if (includeIndividualStats) getIndividualStatistics(repo.listContributors().map { it.login }, mergedPRs)
         else emptyList()
 
-    if (outputType.equals(JsonOutputType, ignoreCase = true)) {
+    if (outputType.equals(JSON_OUTPUT_TYPE, ignoreCase = true)) {
         // yes this could be a function to make it a little less redundant... oh well
         val json = JsonMapper.writeValueAsString(
             mapOf(
@@ -149,27 +148,33 @@ private fun handleMergedPrAnalysis(
         individualContributorStats.filter { it.wasRequestedReviews > 0 || it.submittedReviews > 0 }.map {
             println(
                 "Name: ${it.author} " +
-                        "- Submitted Reviews: ${it.submittedReviews} " +
-                        "- Was Requested Review: ${it.wasRequestedReviews}"
+                    "- Submitted Reviews: ${it.submittedReviews} " +
+                    "- Was Requested Review: ${it.wasRequestedReviews}"
             )
         }
     }
 }
+
 /*
  Given a Local DateTime, normalizes the Date into the work time between WORKSTARTTIME and WORKENDTIME, excluding weekends.
 
  If the date falls outside the workday window, the normalized date will be the start of the next working day.
  */
-private fun getWorkHourDate(someDate:LocalDateTime) : LocalDateTime
-{
-    var normalizedLocalDateTime : LocalDateTime = someDate
+private fun getWorkHourDate(someDate: LocalDateTime): LocalDateTime {
+    var normalizedLocalDateTime: LocalDateTime = someDate
 
-    if ( someDate.hour < WORKSTARTTIME) {
-        normalizedLocalDateTime = LocalDateTime.of(LocalDate.of(someDate.year, someDate.month, someDate.dayOfMonth), LocalTime.of(WORKSTARTTIME,0))
+    if (someDate.hour < WORK_START_TIME) {
+        normalizedLocalDateTime = LocalDateTime.of(
+            LocalDate.of(someDate.year, someDate.month, someDate.dayOfMonth),
+            LocalTime.of(WORK_START_TIME, 0)
+        )
     }
-    if ( someDate.hour >= WORKENDTIME) {
-        val tomorrowDate = someDate.plusDays(1);
-        normalizedLocalDateTime = LocalDateTime.of(LocalDate.of(tomorrowDate.year, tomorrowDate.month, tomorrowDate.dayOfMonth), LocalTime.of(WORKSTARTTIME,0))
+    if (someDate.hour >= WORK_END_TIME) {
+        val tomorrowDate = someDate.plusDays(1)
+        normalizedLocalDateTime = LocalDateTime.of(
+            LocalDate.of(tomorrowDate.year, tomorrowDate.month, tomorrowDate.dayOfMonth),
+            LocalTime.of(WORK_START_TIME, 0)
+        )
     }
 
     // If start on a weekend, move to first moment of Monday.
@@ -181,53 +186,45 @@ private fun getWorkHourDate(someDate:LocalDateTime) : LocalDateTime
     return normalizedLocalDateTime
 }
 
-private fun calcDurationWithoutWeekends(startLocalDateTime: LocalDateTime, endLocalDateTime: LocalDateTime) : Duration {
+private fun calcDurationWithoutWeekends(startLocalDateTime: LocalDateTime, endLocalDateTime: LocalDateTime): Duration {
 
     val formatter: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMddHH")
+    val start: LocalDateTime = getWorkHourDate(startLocalDateTime)
+    val stop: LocalDateTime = getWorkHourDate(endLocalDateTime)
 
-    var start: LocalDateTime = getWorkHourDate(startLocalDateTime)
-
-    if (PRINTOUTPUTMESSAGES) { println("Start is "+startLocalDateTime) }
-    if (PRINTOUTPUTMESSAGES) { println("Normalized Start is "+start) }
-
-    var stop: LocalDateTime = getWorkHourDate(endLocalDateTime)
-
-    if (PRINTOUTPUTMESSAGES) { println("Stop is "+endLocalDateTime)}
-    if (PRINTOUTPUTMESSAGES) { println("Normalized Stop is "+stop) }
-
-    if ((start.isEqual(stop))||(start.isAfter(stop))) { // error states, no calc to do
-        0
+    if ((start.isEqual(stop)) || (start.isAfter(stop))) { // error states, no calc to do
+        throw IllegalArgumentException("Start ${start} cannot be after end: ${stop}")
     }
 
     if (start.toLocalDate().equals(stop.toLocalDate())) {
-        if (PRINTOUTPUTMESSAGES) { println("hourly duration is "+Duration.between(start,stop))}
-        return Duration.between(start,stop)
+        return Duration.between(start, stop)
     }
 
     val firstMomentOfDayAfterStart = start.toLocalDate().plusDays(1).atStartOfDay()
-    val firstDayDuration = Duration.between(start, LocalDateTime.of(LocalDate.of(start.year, start.month, start.dayOfMonth), LocalTime.of(WORKENDTIME,0)))
-    if (PRINTOUTPUTMESSAGES) { println("firstDayDuration is "+firstDayDuration)}
-    val lastDayDuration = Duration.between(LocalDateTime.of(LocalDate.of(stop.year, stop.month, stop.dayOfMonth), LocalTime.of(WORKSTARTTIME,0)), stop)
-    if (PRINTOUTPUTMESSAGES) { println("lastDayDuration is "+lastDayDuration)}
-
-    var countWeekdays : Long = 0;
-    var firstMomentOfSomeDay = firstMomentOfDayAfterStart;
-    while( firstMomentOfSomeDay.toLocalDate().isBefore( stop.toLocalDate() ) ) {
-        var dayOfWeek = firstMomentOfSomeDay.getDayOfWeek();
-        if( dayOfWeek.equals( DayOfWeek.SATURDAY ) || dayOfWeek.equals( DayOfWeek.SUNDAY ) ) {
-            // ignore this day.
-        } else {
-            countWeekdays ++  // Tally another weekday.
-        }
+    val firstDayDuration = Duration.between(
+        start,
+        LocalDateTime.of(LocalDate.of(start.year, start.month, start.dayOfMonth), LocalTime.of(WORK_END_TIME, 0))
+    )
+    
+    val lastDayDuration = Duration.between(
+        LocalDateTime.of(
+            LocalDate.of(stop.year, stop.month, stop.dayOfMonth),
+            LocalTime.of(WORK_START_TIME, 0)
+        ), stop
+    )
+    
+    var countWeekdays: Long = 0
+    var firstMomentOfSomeDay = firstMomentOfDayAfterStart
+    while (firstMomentOfSomeDay.toLocalDate().isBefore(stop.toLocalDate())) {
+        val dayOfWeek = firstMomentOfSomeDay.dayOfWeek
+        
+        if (!dayOfWeek.equals(DayOfWeek.SATURDAY) && !dayOfWeek.equals(DayOfWeek.SUNDAY)) countWeekdays++
         // Set up the next loop.
-        firstMomentOfSomeDay = firstMomentOfSomeDay.plusDays( 1 )
+        firstMomentOfSomeDay = firstMomentOfSomeDay.plusDays(1)
     }
-    if (PRINTOUTPUTMESSAGES) { println("count of middle days is "+countWeekdays)}
-    if (PRINTOUTPUTMESSAGES) { println("total duration is "+firstDayDuration.toString() + Duration.ofDays(countWeekdays) + lastDayDuration.toString())}
 
-    return firstDayDuration + Duration.ofHours(countWeekdays*8) + lastDayDuration
+    return firstDayDuration + Duration.ofHours(countWeekdays * 8) + lastDayDuration
 }
-
 
 private fun printMergeStats(prefix: String, firstReviewDuration: Duration, mergeDuration: Duration) {
     println("$prefix Time to First Review: ${firstReviewDuration.toDays()} days, ${firstReviewDuration.toHoursPart()} hours, ${firstReviewDuration.toMinutesPart()} minutes.")
@@ -274,10 +271,10 @@ data class ContributorStats(
 )
 
 private fun handleOpenPrAnalysis(repo: GHRepository, PRPullLimit: Int, outputType: String) {
-    if (outputType.equals(TextOutputType, ignoreCase = true)) println("Open PRs\nWorking...")
+    if (outputType.equals(TEXT_OUTPUT_TYPE, ignoreCase = true)) println("Open PRs\nWorking...")
 
     val openPRs = repo.queryPullRequests().state(GHIssueState.OPEN).list().take(PRPullLimit)
-    if (outputType.equals(JsonOutputType, ignoreCase = true)) {
+    if (outputType.equals(JSON_OUTPUT_TYPE, ignoreCase = true)) {
         val json = JsonMapper.writeValueAsString(openPRs.map {
             mapOf(
                 "number" to it.number,
@@ -289,9 +286,9 @@ private fun handleOpenPrAnalysis(repo: GHRepository, PRPullLimit: Int, outputTyp
     } else {
         openPRs.forEach {
             val openDuration = calcDurationWithoutWeekends(
-                    it.createdAt.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime(),
-                    LocalDateTime.now(ZoneId.systemDefault())
-                )
+                it.createdAt.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime(),
+                LocalDateTime.now(ZoneId.systemDefault())
+            )
             println("PR: ${it.number} ${it.title} has been open for ${openDuration.toDays()} days, ${openDuration.toHoursPart()} hours.")
         }
     }
@@ -303,7 +300,7 @@ fun main(args: Array<String>) {
         ArgType.String,
         fullName = "analyze",
         shortName = "a",
-        description = "Analyze PR Type - ${AllowedAnalysisTypes}"
+        description = "Analyze PR Type - ${ALLOWED_ANALYSIS_TYPES}"
     ).required()
     val pullRequestPullLimit by parser.option(
         ArgType.Int,
@@ -321,8 +318,8 @@ fun main(args: Array<String>) {
         ArgType.String,
         fullName = "output",
         shortName = "o",
-        description = "How to output the analytics results. - ${AllowedOutputTypes}"
-    ).default(TextOutputType)
+        description = "How to output the analytics results. - ${ALLOWED_OUTPUT_TYPES}"
+    ).default(TEXT_OUTPUT_TYPE)
     val includeIndividualStats by parser.option(
         ArgType.Boolean,
         fullName = "individual-stats",
@@ -337,14 +334,14 @@ fun main(args: Array<String>) {
     )
     parser.parse(args)
 
-    if (!AllowedAnalysisTypes.contains(analysisType.uppercase())) {
-        throw RuntimeException("--analyze parameter must be of value ${AllowedAnalysisTypes}")
+    if (!ALLOWED_ANALYSIS_TYPES.contains(analysisType.uppercase())) {
+        throw RuntimeException("--analyze parameter must be of value ${ALLOWED_ANALYSIS_TYPES}")
     }
-    if (!AllowedOutputTypes.contains(outputType.uppercase())) {
-        throw RuntimeException("--output parameter must be of value ${AllowedOutputTypes}")
+    if (!ALLOWED_OUTPUT_TYPES.contains(outputType.uppercase())) {
+        throw RuntimeException("--output parameter must be of value ${ALLOWED_OUTPUT_TYPES}")
     }
 
-    if (analysisType.equals(CodeReviewReportType, ignoreCase = true)) {
+    if (analysisType.equals(CODE_REVIEW_REPORT_TYPE, ignoreCase = true)) {
         if (ticketsInReport == null)
             throw RuntimeException("--tickets can not be empty when doing a Code Review Report printout.")
         getCodeReviewReportInfo(ticketsInReport!!.split(","), pullRequestPullLimit, repositoryName, outputType)
