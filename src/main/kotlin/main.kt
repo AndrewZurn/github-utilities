@@ -42,13 +42,18 @@ private fun getCodeReviewReportInfo(
 ) {
     println("Code Review Report PR Printout")
     println("Gathering PRs, finding authors and changed files for list ${ticketsInReport.joinToString(", ")}...")
+    val numberRegex = "(\\d+)".toRegex()
     val repo = getGithubRepo(repoName)
     repo.queryPullRequests().state(GHIssueState.CLOSED)
         .list()
         .take(PRPullLimit)
         .map { pr ->
+            val prTitle = pr.title
             ticketsInReport
-                .find { ticket -> pr.title.contains(ticket, ignoreCase = true) }
+                .find { ticket ->
+                    val ticketNumber = numberRegex.find(ticket)?.value ?: ""
+                    prTitle.contains(ticket, ignoreCase = true) || prTitle.contains(ticketNumber, ignoreCase = true)
+                }
                 ?.let { ticket -> ticket to pr } // keep the ticket num to the PR instance to allow for easier formatting later on
         }
         .filterNotNull()
