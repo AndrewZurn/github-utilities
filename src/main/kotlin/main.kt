@@ -41,7 +41,7 @@ private fun getCodeReviewReportInfo(
     outputType: String
 ) {
     println("Code Review Report PR Printout")
-    println("Gathering PRs, finding authors and changed files for list ${ticketsInReport.joinToString(", ")}...")
+    println("Gathering PRs, finding authors and changed files for list: ${ticketsInReport.joinToString(", ")}...")
     val numberRegex = "(\\d+)".toRegex()
     val repo = getGithubRepo(repoName)
     repo.queryPullRequests().state(GHIssueState.CLOSED)
@@ -63,7 +63,8 @@ private fun getCodeReviewReportInfo(
                 else file.filename
             }
 
-            println("Ticket: ${ticket}")
+            println("Ticket: $ticket")
+            println("Pull Request URL: ${pr.url}")
             println("Reviewers: ${pr.listReviews().joinToString(", ") { it.user.login }}")
             println("Files Changed:")
             println(filesChanged.joinToString("\r\n"))
