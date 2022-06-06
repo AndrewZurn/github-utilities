@@ -47,6 +47,7 @@ private fun getCodeReviewReportInfo(
     repo.queryPullRequests().state(GHIssueState.CLOSED)
         .list()
         .take(PRPullLimit)
+        .filter { pr -> pr.isMerged }
         .map { pr ->
             val prTitle = pr.title
             ticketsInReport
@@ -86,7 +87,7 @@ private fun handleMergedPrAnalysis(
     val mergedPRs = repo.queryPullRequests().state(GHIssueState.CLOSED)
         .list()
         .take(PRPullLimit)
-        .filter { it.mergedAt != null }
+        .filter { it.isMerged }
         .filter { it.labels.map { label -> label.name }.contains("exclude-from-analysis").not() }
 
     val timeToMergeDurations = mergedPRs.map {
