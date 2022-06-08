@@ -199,7 +199,7 @@ private fun calcDurationWithoutWeekends(startLocalDateTime: LocalDateTime, endLo
     val start: LocalDateTime = getWorkHourDate(startLocalDateTime)
     val stop: LocalDateTime = getWorkHourDate(endLocalDateTime)
 
-    if ((start.isEqual(stop)) || (start.isAfter(stop))) { // error states, no calc to do
+    if (start.isAfter(stop)) { // error states, no calc to do
         throw IllegalArgumentException("Start ${start} cannot be after end: ${stop}")
     }
 
