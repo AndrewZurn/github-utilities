@@ -20,18 +20,43 @@ private const val WORK_END_TIME = 18  // End at 6 pm
 
 private val JsonMapper = jacksonObjectMapper()
 
-fun analyze(PRType: String, prPullLimit: Int, repoName: String, outputType: String, includeIndividualStats: Boolean) {
+fun analyze(
+    prType: String,
+    prPullLimit: Int,
+    repoName: String,
+    outputType: String,
+    includeIndividualStats: Boolean,
+    inclusionLabels: List<String> = emptyList()) {
     val repo = getGithubRepo(repoName)
-    if (PRType.equals(OPEN_PR_TYPE, ignoreCase = true)) {
+    if (prType.equals(OPEN_PR_TYPE, ignoreCase = true)) {
         handleOpenPrAnalysis(repo, prPullLimit, outputType)
     } else {
-        handleMergedPrAnalysis(repo, prPullLimit, outputType, includeIndividualStats)
+        handleMergedPrAnalysis(repo, prPullLimit, outputType, includeIndividualStats, inclusionLabels)
     }
 }
+
+
 
 private fun getGithubRepo(repoName: String): GHRepository {
     val github = GitHubBuilder.fromEnvironment().build()
     return github.getRepository(repoName)
+}
+
+// create a function that will calculate the duration between two dates, excluding weeknights after 5pm and weekends
+private fun calcDurationWithoutWeekends2(start: LocalDateTime, end: LocalDateTime): Duration {
+    var duration = Duration.between(start, end)
+    var current = start
+    while (current.isBefore(end)) {
+        if (current.dayOfWeek == DayOfWeek.SATURDAY || current.dayOfWeek == DayOfWeek.SUNDAY) {
+            duration = duration.minusHours(24)
+        } else if (current.hour >= WORK_END_TIME) {
+            duration = duration.minusHours((current.hour - WORK_END_TIME).toLong())
+        } else if (current.hour < WORK_START_TIME) {
+            duration = duration.minusHours((WORK_START_TIME - current.hour).toLong())
+        }
+        current = current.plusHours(1)
+    }
+    return duration
 }
 
 private fun getCodeReviewReportInfo(
@@ -77,18 +102,23 @@ private fun handleMergedPrAnalysis(
     repo: GHRepository,
     PRPullLimit: Int,
     outputType: String,
-    includeIndividualStats: Boolean
+    includeIndividualStats: Boolean,
+    inclusionLabels: List<String> = emptyList()
 ) {
     if (outputType.equals(TEXT_OUTPUT_TYPE, ignoreCase = true))
         println("\nClosed PR Statistics (limit ${PRPullLimit})\nWorking...")
 
     // get PRs that were successfully merged
-    println("Gathering merged PRs...")
+    print("Gathering merged PRs... ")
     val mergedPRs = repo.queryPullRequests().state(GHIssueState.CLOSED)
         .list()
         .take(PRPullLimit)
         .filter { it.isMerged }
         .filter { it.labels.map { label -> label.name }.contains("exclude-from-analysis").not() }
+        .filter { it.labels.map { label -> label.name }.any { labelName -> inclusionLabels.contains(labelName) } }
+
+    println("Number of PRs to analyze: ${mergedPRs.count()}")
+    println("PR Numbers: ${mergedPRs.map { it.number }.joinToString(", ")}")
 
     val timeToMergeDurations = mergedPRs.map {
         calcDurationWithoutWeekends(
@@ -262,7 +292,6 @@ private fun getIndividualStatistics(contributorNames: List<String>, prs: List<GH
         .mapValues { it.key to it.value.count() }
 
     return contributorNames.map { contributorName ->
-        println("Generating statistics for: $contributorName")
         ContributorStats(
             author = contributorName,
             submittedReviews = contributorsToPrs[contributorName]?.second ?: 0,
@@ -339,6 +368,12 @@ fun main(args: Array<String>) {
         shortName = "t",
         description = "The a comma-separated list of tickets to be included in the code review report printout."
     )
+    val inclusionLabels by parser.option(
+        ArgType.String,
+        fullName = "include-labels",
+        shortName = "il",
+        description = "The a comma-separated list of labels to be included in the code review report printout."
+    )
     parser.parse(args)
 
     if (!ALLOWED_ANALYSIS_TYPES.contains(analysisType.uppercase())) {
@@ -353,6 +388,13 @@ fun main(args: Array<String>) {
             throw RuntimeException("--tickets can not be empty when doing a Code Review Report printout.")
         getCodeReviewReportInfo(ticketsInReport!!.split(","), pullRequestPullLimit, repositoryName, outputType)
     } else {
-        analyze(analysisType, pullRequestPullLimit, repositoryName, outputType, includeIndividualStats)
+        analyze(
+            prType = analysisType,
+            prPullLimit = pullRequestPullLimit,
+            repoName = repositoryName,
+            outputType = outputType,
+            includeIndividualStats = includeIndividualStats,
+            inclusionLabels = inclusionLabels?.split(",") ?: emptyList()
+        )
     }
 }

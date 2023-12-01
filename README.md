@@ -13,7 +13,7 @@ read from the repository (must be public or you must own it/have read permission
 
 Example - Print Merged Stats
 ```
-github-utilities/dist> ./github-utilities --analyze merged --pr-limit 10 --repo-name <your-repo-name>
+github-utilities/dist> ./github-utilities --analyze merged --pr-limit 10 --repo-name <your-repo-name> --include-labels team1,release2
 ```
 
 Example - Print in JSON
