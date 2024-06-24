@@ -40,6 +40,7 @@ val jar by tasks.getting(Jar::class) {
     from(configurations.runtimeClasspath.get().map { if (it.isDirectory) it else zipTree(it) }) {
         exclude("META-INF/*.RSA", "META-INF/*.SF", "META-INF/*.DSA")
     }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
 // package it as an executable (ie. ./executable-name)
