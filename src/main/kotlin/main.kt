@@ -1,12 +1,15 @@
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
-import kotlinx.cli.ArgParser
-import kotlinx.cli.ArgType
-import kotlinx.cli.default
-import kotlinx.cli.multiple
-import kotlinx.cli.required
+import com.github.ajalt.clikt.core.CliktCommand
+import com.github.ajalt.clikt.parameters.options.check
+import com.github.ajalt.clikt.parameters.options.default
+import com.github.ajalt.clikt.parameters.options.flag
+import com.github.ajalt.clikt.parameters.options.help
+import com.github.ajalt.clikt.parameters.options.multiple
+import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.clikt.parameters.options.required
+import com.github.ajalt.clikt.parameters.types.int
 import org.kohsuke.github.*
 import java.time.*
-import java.time.format.DateTimeFormatter
 
 private const val OPEN_PR_TYPE = "OPEN"
 private const val MERGED_PR_TYPE = "MERGED"
@@ -332,77 +335,66 @@ private fun handleOpenPrAnalysis(reposAndPullRequestsLimits: List<Pair<String, I
     }
 }
 
-fun main(args: Array<String>) {
-    val parser = ArgParser("Github PR Utility")
-    val analysisType by parser.option(
-        ArgType.String,
-        fullName = "analyze",
-        shortName = "a",
-        description = "Analyze PR Type - ${ALLOWED_ANALYSIS_TYPES}"
-    ).required()
-    val pullRequestPullLimit by parser.option(
-        ArgType.Int,
-        fullName = "pr-limit",
-        shortName = "l",
-        description = "Limit the amount of PRs to analyze."
-    ).default(10).multiple()
-    val repositoryNames by parser.option(
-        ArgType.String,
-        fullName = "repo-name",
-        shortName = "r",
-        description = "The repository to analyze (user must have read permission)."
-    ).required().multiple()
-    val outputType by parser.option(
-        ArgType.String,
-        fullName = "output",
-        shortName = "o",
-        description = "How to output the analytics results. - ${ALLOWED_OUTPUT_TYPES}"
-    ).default(TEXT_OUTPUT_TYPE)
-    val includeIndividualStats by parser.option(
-        ArgType.Boolean,
-        fullName = "individual-stats",
-        shortName = "i",
-        description = "Should include statistics on each individual contributor."
-    ).default(false)
-    val ticketsInReport by parser.option(
-        ArgType.String,
-        fullName = "tickets",
-        shortName = "t",
-        description = "The a comma-separated list of tickets to be included in the code review report printout."
-    )
-    val inclusionLabels by parser.option(
-        ArgType.String,
-        fullName = "include-labels",
-        shortName = "il",
-        description = "The a comma-separated list of labels to be included in the code review report printout."
-    )
-    parser.parse(args)
+class GithubPrAnalyzer : CliktCommand() {
+    private val analysisType: String by option("-a", "--analyze")
+        .required()
+        .help("Analyze PR Type - $ALLOWED_ANALYSIS_TYPES")
+    private val pullRequestPullLimit: List<Int> by option("-l", "--pr-limit")
+        .int()
+        .multiple(listOf(10))
+        .help("Limit the amount of PRs to analyze (default 10). Can be a list, where each " +
+            "item will be used to limit querying of the repo name at the matching index in the repo-name list.")
+    private val repositoryNames: List<String> by option("-r", "--repo-name")
+        .multiple()
+        .help("The repository to analyze (user must have read permission). Can be a list.")
+        .check("Must provide at least one repo-name") { it.isNotEmpty() }
+    private val outputType: String by option("-o", "--output")
+        .default(TEXT_OUTPUT_TYPE)
+        .help("How to output the analytics results. - $ALLOWED_OUTPUT_TYPES")
+    private val includeIndividualStats: Boolean by option("-i", "--individual-stats")
+        .flag(default = false)
+        .help("The a comma-separated list of tickets to be included in the code review report printout.")
+    private val ticketsInReport: String? by option("-t", "--tickets")
+        .help("Should include statistics on each individual contributor.")
+    private val inclusionLabels: String? by option("-il", "--include-labels")
+        .help("The a comma-separated list of labels to be included in the code review report printout.")
 
-    if (!ALLOWED_ANALYSIS_TYPES.contains(analysisType.uppercase())) {
-        throw RuntimeException("--analyze parameter must be of value ${ALLOWED_ANALYSIS_TYPES}")
-    }
-    if (!ALLOWED_OUTPUT_TYPES.contains(outputType.uppercase())) {
-        throw RuntimeException("--output parameter must be of value ${ALLOWED_OUTPUT_TYPES}")
-    }
+    override val commandHelp: String
+        get() = """
+            Example options to analyze multiple PRs with individual contributor statistics.
+            
+            -a merged -i -r <ORG>/<REPO_1> -l <REPO_1_LIMIT> -r <ORG>/<REPO_2> -l <REPO_2_LIMIT>
+        """.trimIndent()
 
-    val reposAndPullRequestsLimits = when (pullRequestPullLimit.size) {
-        1 -> repositoryNames.map { it to pullRequestPullLimit.first() }
-        repositoryNames.size -> repositoryNames.zip(pullRequestPullLimit)
-        else ->
-            throw RuntimeException("'pr-limit' option must have a single provided argument or must the length of the 'repo-name' option.")
-    }
+    override fun run() {
+        if (!ALLOWED_ANALYSIS_TYPES.contains(analysisType.uppercase())) {
+            throw RuntimeException("--analyze parameter must be of value ${ALLOWED_ANALYSIS_TYPES}")
+        }
+        if (!ALLOWED_OUTPUT_TYPES.contains(outputType.uppercase())) {
+            throw RuntimeException("--output parameter must be of value ${ALLOWED_OUTPUT_TYPES}")
+        }
 
-    if (analysisType.equals(CODE_REVIEW_REPORT_TYPE, ignoreCase = true)) {
-        if (ticketsInReport == null)
-            throw RuntimeException("--tickets can not be empty when doing a Code Review Report printout.")
-        getCodeReviewReportInfo(ticketsInReport!!.split(","), reposAndPullRequestsLimits, outputType)
-    } else {
-        analyze(
-            prType = analysisType,
-            reposAndPullRequestsLimits = reposAndPullRequestsLimits,
-            outputType = outputType,
-            includeIndividualStats = includeIndividualStats,
-            inclusionLabels = inclusionLabels?.split(",") ?: emptyList()
-        )
+        val reposAndPullRequestsLimits = when (pullRequestPullLimit.size) {
+            1 -> repositoryNames.map { it to pullRequestPullLimit.first() }
+            repositoryNames.size -> repositoryNames.zip(pullRequestPullLimit)
+            else ->
+                throw RuntimeException("'pr-limit' option must have a single provided argument or must the length of the 'repo-name' option.")
+        }
+
+        if (analysisType.equals(CODE_REVIEW_REPORT_TYPE, ignoreCase = true)) {
+            if (ticketsInReport == null)
+                throw RuntimeException("--tickets can not be empty when doing a Code Review Report printout.")
+            getCodeReviewReportInfo(ticketsInReport!!.split(","), reposAndPullRequestsLimits, outputType)
+        } else {
+            analyze(
+                prType = analysisType,
+                reposAndPullRequestsLimits = reposAndPullRequestsLimits,
+                outputType = outputType,
+                includeIndividualStats = includeIndividualStats,
+                inclusionLabels = inclusionLabels?.split(",") ?: emptyList()
+            )
+        }
     }
 }
+
+fun main(args: Array<String>) = GithubPrAnalyzer().main(args)
