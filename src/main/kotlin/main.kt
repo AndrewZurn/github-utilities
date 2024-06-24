@@ -167,10 +167,6 @@ private fun handleMergedPrAnalysis(
                         "firstReview" to timeToFirstReviewDurations.maxOrNull()!!.seconds,
                         "merge" to timeToMergeDurations.maxOrNull()!!.seconds
                     ),
-                    "min" to mapOf(
-                        "firstReview" to timeToFirstReviewDurations.minOrNull()!!.seconds,
-                        "merge" to timeToMergeDurations.minOrNull()!!.seconds
-                    ),
                     "individualStats" to individualContributorStats.map {
                         mapOf(
                             "name" to it.author,
@@ -185,7 +181,6 @@ private fun handleMergedPrAnalysis(
             println("Results for repo: $repoName")
             printMergeStats("Average", averageTimeToFirstReview, averageTimeToMerge)
             printMergeStats("Max", timeToFirstReviewDurations.maxOrNull()!!, timeToMergeDurations.maxOrNull()!!)
-            printMergeStats("Min", timeToFirstReviewDurations.minOrNull()!!, timeToMergeDurations.minOrNull()!!)
             individualContributorStats.filter { it.wasRequestedReviews > 0 || it.submittedReviews > 0 }.map {
                 println(
                     "Name: ${it.author} " +
