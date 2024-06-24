@@ -2,6 +2,7 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import kotlinx.cli.ArgParser
 import kotlinx.cli.ArgType
 import kotlinx.cli.default
+import kotlinx.cli.multiple
 import kotlinx.cli.required
 import org.kohsuke.github.*
 import java.time.*
@@ -22,16 +23,14 @@ private val JsonMapper = jacksonObjectMapper()
 
 fun analyze(
     prType: String,
-    prPullLimit: Int,
-    repoName: String,
+    reposAndPullRequestsLimits: List<Pair<String, Int>>,
     outputType: String,
     includeIndividualStats: Boolean,
     inclusionLabels: List<String> = emptyList()) {
-    val repo = getGithubRepo(repoName)
     if (prType.equals(OPEN_PR_TYPE, ignoreCase = true)) {
-        handleOpenPrAnalysis(repo, prPullLimit, outputType)
+        handleOpenPrAnalysis(reposAndPullRequestsLimits, outputType)
     } else {
-        handleMergedPrAnalysis(repo, prPullLimit, outputType, includeIndividualStats, inclusionLabels)
+        handleMergedPrAnalysis(reposAndPullRequestsLimits, outputType, includeIndividualStats, inclusionLabels)
     }
 }
 
@@ -61,133 +60,139 @@ private fun calcDurationWithoutWeekends2(start: LocalDateTime, end: LocalDateTim
 
 private fun getCodeReviewReportInfo(
     ticketsInReport: List<String>,
-    PRPullLimit: Int,
-    repoName: String,
+    reposAndPullRequestsLimits: List<Pair<String, Int>>,
     outputType: String
 ) {
-    println("Code Review Report PR Printout")
-    println("Gathering PRs, finding authors and changed files for list: ${ticketsInReport.joinToString(", ")}...")
-    val numberRegex = "(\\d+)".toRegex()
-    val repo = getGithubRepo(repoName)
-    repo.queryPullRequests().state(GHIssueState.CLOSED)
-        .list()
-        .take(PRPullLimit)
-        .filter { pr -> pr.isMerged }
-        .map { pr ->
-            val prTitle = pr.title
-            ticketsInReport
-                .find { ticket ->
-                    val ticketNumber = numberRegex.find(ticket)?.value ?: ""
-                    prTitle.contains(ticket, ignoreCase = true) || prTitle.contains(ticketNumber, ignoreCase = true)
-                }
-                ?.let { ticket -> ticket to pr } // keep the ticket num to the PR instance to allow for easier formatting later on
-        }
-        .filterNotNull()
-        .forEach { (ticket, pr) ->
-            val filesChanged = pr.listFiles().map { file ->
-                if (file.previousFilename != null) "${file.previousFilename} -> ${file.filename}"
-                else file.filename
+    reposAndPullRequestsLimits.map { (repoName, prPullLimit) ->
+        println("Code Review Report PR Printout for repo: $repoName - Pull Request Pull Limit: $prPullLimit")
+        println("Gathering PRs, finding authors and changed files for list: ${ticketsInReport.joinToString(", ")}...")
+        val numberRegex = "(\\d+)".toRegex()
+        val repo = getGithubRepo(repoName)
+        repo.queryPullRequests().state(GHIssueState.CLOSED)
+            .list()
+            .take(prPullLimit)
+            .filter { pr -> pr.isMerged }
+            .map { pr ->
+                val prTitle = pr.title
+                ticketsInReport
+                    .find { ticket ->
+                        val ticketNumber = numberRegex.find(ticket)?.value ?: ""
+                        prTitle.contains(ticket, ignoreCase = true) || prTitle.contains(ticketNumber, ignoreCase = true)
+                    }
+                    ?.let { ticket -> ticket to pr } // keep the ticket num to the PR instance to allow for easier formatting later on
             }
+            .filterNotNull()
+            .forEach { (ticket, pr) ->
+                val filesChanged = pr.listFiles().map { file ->
+                    if (file.previousFilename != null) "${file.previousFilename} -> ${file.filename}"
+                    else file.filename
+                }
 
-            println("Ticket: $ticket")
-            println("Pull Request URL: ${pr.url}")
-            println("Reviewers: ${pr.listReviews().joinToString(", ") { it.user.login }}")
-            println("Files Changed:")
-            println(filesChanged.joinToString("\r\n"))
-            println("====================")
-        }
+                println("Ticket: $ticket")
+                println("Pull Request URL: ${pr.url}")
+                println("Reviewers: ${pr.listReviews().joinToString(", ") { it.user.login }}")
+                println("Files Changed:")
+                println(filesChanged.joinToString("\r\n"))
+                println("====================")
+            }
+    }
 }
 
 private fun handleMergedPrAnalysis(
-    repo: GHRepository,
-    PRPullLimit: Int,
+    reposAndPullRequestsLimits: List<Pair<String, Int>>,
     outputType: String,
     includeIndividualStats: Boolean,
     inclusionLabels: List<String> = emptyList()
 ) {
-    if (outputType.equals(TEXT_OUTPUT_TYPE, ignoreCase = true))
-        println("\nClosed PR Statistics (limit ${PRPullLimit})\nWorking...")
+    reposAndPullRequestsLimits.map { (repoName, prPullLimit) ->
+        if (outputType.equals(TEXT_OUTPUT_TYPE, ignoreCase = true))
+            println("\nClosed PR Statistics for repo: $repoName - Pull Request Pull Limit: $prPullLimit\nWorking...")
 
-    // get PRs that were successfully merged
-    print("Gathering merged PRs... ")
-    val mergedPRs = repo.queryPullRequests().state(GHIssueState.CLOSED)
-        .list()
-        .take(PRPullLimit)
-        .filter { it.isMerged }
-        .filter { it.labels.map { label -> label.name }.contains("exclude-from-analysis").not() }
-        .filter { it.labels.map { label -> label.name }.any { labelName -> inclusionLabels.contains(labelName) } }
+        val repo = getGithubRepo(repoName)
 
-    println("Number of PRs to analyze: ${mergedPRs.count()}")
-    println("PR Numbers: ${mergedPRs.map { it.number }.joinToString(", ")}")
+        // get PRs that were successfully merged
+        print("Gathering merged PRs... ")
+        val closedPrs = repo.queryPullRequests().state(GHIssueState.CLOSED)
+            .list()
+            .take(prPullLimit)
+        val mergedPRs = closedPrs
+            .filter { it.isMerged }
+            // .filter { it.labels.map { label -> label.name }.contains("exclude-from-analysis").not() }
+            // .filter { it.labels.map { label -> label.name }.any { labelName -> inclusionLabels.contains(labelName) } }
 
-    val timeToMergeDurations = mergedPRs.map {
-        calcDurationWithoutWeekends(
-            it.createdAt.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime(),
-            it.mergedAt.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime(),
-        )
-    }
+        println("Number of PRs to analyze: ${mergedPRs.count()}")
+        println("PR Numbers: ${mergedPRs.map { it.number }.joinToString(", ")}")
 
-    println("Gathering time to first review durations...")
-    val timeToFirstReviewDurations = mergedPRs.map {
-        val reviews = it.listReviews()
-        if (reviews.any()) { // if a PR didn't have a review but was merged
-            val firstReview = reviews.first { it.state != GHPullRequestReviewState.PENDING }
-            val firstReviewTime = firstReview.createdAt.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime()
+        val timeToMergeDurations = mergedPRs.map {
             calcDurationWithoutWeekends(
                 it.createdAt.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime(),
-                firstReviewTime
+                it.mergedAt.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime(),
             )
-        } else {
-            null
         }
-    }.filterNotNull()
 
-    println("Analyzing average time to first review...")
-    val averageTimeToFirstReview =
-        Duration.ofSeconds(timeToFirstReviewDurations.map { it.seconds }.sum() / mergedPRs.count())
-    println("Analyzing average time to merge...")
-    val averageTimeToMerge = Duration.ofSeconds(timeToMergeDurations.map { it.seconds }.sum() / mergedPRs.count())
+        println("Gathering time to first review durations...")
+        val timeToFirstReviewDurations = mergedPRs.map {
+            val reviews = it.listReviews()
+            if (reviews.any()) { // if a PR didn't have a review but was merged
+                val firstReview = reviews.first { it.state != GHPullRequestReviewState.PENDING }
+                val firstReviewTime = firstReview.createdAt.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime()
+                calcDurationWithoutWeekends(
+                    it.createdAt.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime(),
+                    firstReviewTime
+                )
+            } else {
+                null
+            }
+        }.filterNotNull()
 
-    val individualContributorStats =
-        if (includeIndividualStats) getIndividualStatistics(repo.listContributors().map { it.login }, mergedPRs)
-        else emptyList()
+        println("Analyzing average time to first review...")
+        val averageTimeToFirstReview =
+            Duration.ofSeconds(timeToFirstReviewDurations.map { it.seconds }.sum() / mergedPRs.count())
+        println("Analyzing average time to merge...")
+        val averageTimeToMerge = Duration.ofSeconds(timeToMergeDurations.map { it.seconds }.sum() / mergedPRs.count())
 
-    if (outputType.equals(JSON_OUTPUT_TYPE, ignoreCase = true)) {
-        // yes this could be a function to make it a little less redundant... oh well
-        val json = JsonMapper.writeValueAsString(
-            mapOf(
-                "average" to mapOf(
-                    "firstReview" to averageTimeToFirstReview.seconds,
-                    "merge" to averageTimeToMerge.seconds
-                ),
-                "max" to mapOf(
-                    "firstReview" to timeToFirstReviewDurations.maxOrNull()!!.seconds,
-                    "merge" to timeToMergeDurations.maxOrNull()!!.seconds
-                ),
-                "min" to mapOf(
-                    "firstReview" to timeToFirstReviewDurations.minOrNull()!!.seconds,
-                    "merge" to timeToMergeDurations.minOrNull()!!.seconds
-                ),
-                "individualStats" to individualContributorStats.map {
-                    mapOf(
-                        "name" to it.author,
-                        "submittedReviews" to it.submittedReviews,
-                        "wasRequestedReviews" to it.wasRequestedReviews
-                    )
-                }
+        val individualContributorStats =
+            if (includeIndividualStats) getIndividualStatistics(repo.listContributors().map { it.login }, mergedPRs)
+            else emptyList()
+
+        if (outputType.equals(JSON_OUTPUT_TYPE, ignoreCase = true)) {
+            // yes this could be a function to make it a little less redundant... oh well
+            val json = JsonMapper.writeValueAsString(
+                mapOf(
+                    "average" to mapOf(
+                        "firstReview" to averageTimeToFirstReview.seconds,
+                        "merge" to averageTimeToMerge.seconds
+                    ),
+                    "max" to mapOf(
+                        "firstReview" to timeToFirstReviewDurations.maxOrNull()!!.seconds,
+                        "merge" to timeToMergeDurations.maxOrNull()!!.seconds
+                    ),
+                    "min" to mapOf(
+                        "firstReview" to timeToFirstReviewDurations.minOrNull()!!.seconds,
+                        "merge" to timeToMergeDurations.minOrNull()!!.seconds
+                    ),
+                    "individualStats" to individualContributorStats.map {
+                        mapOf(
+                            "name" to it.author,
+                            "submittedReviews" to it.submittedReviews,
+                            "wasRequestedReviews" to it.wasRequestedReviews
+                        )
+                    }
+                )
             )
-        )
-        println(json)
-    } else {
-        printMergeStats("Average", averageTimeToFirstReview, averageTimeToMerge)
-        printMergeStats("Max", timeToFirstReviewDurations.maxOrNull()!!, timeToMergeDurations.maxOrNull()!!)
-        printMergeStats("Min", timeToFirstReviewDurations.minOrNull()!!, timeToMergeDurations.minOrNull()!!)
-        individualContributorStats.filter { it.wasRequestedReviews > 0 || it.submittedReviews > 0 }.map {
-            println(
-                "Name: ${it.author} " +
-                    "- Submitted Reviews: ${it.submittedReviews} " +
-                    "- Was Requested Review: ${it.wasRequestedReviews}"
-            )
+            println(json)
+        } else {
+            println("Results for repo: $repoName")
+            printMergeStats("Average", averageTimeToFirstReview, averageTimeToMerge)
+            printMergeStats("Max", timeToFirstReviewDurations.maxOrNull()!!, timeToMergeDurations.maxOrNull()!!)
+            printMergeStats("Min", timeToFirstReviewDurations.minOrNull()!!, timeToMergeDurations.minOrNull()!!)
+            individualContributorStats.filter { it.wasRequestedReviews > 0 || it.submittedReviews > 0 }.map {
+                println(
+                    "Name: ${it.author} " +
+                        "- Submitted Reviews: ${it.submittedReviews} " +
+                        "- Was Requested Review: ${it.wasRequestedReviews}"
+                )
+            }
         }
     }
 }
@@ -224,8 +229,6 @@ private fun getWorkHourDate(someDate: LocalDateTime): LocalDateTime {
 }
 
 private fun calcDurationWithoutWeekends(startLocalDateTime: LocalDateTime, endLocalDateTime: LocalDateTime): Duration {
-
-    val formatter: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMddHH")
     val start: LocalDateTime = getWorkHourDate(startLocalDateTime)
     val stop: LocalDateTime = getWorkHourDate(endLocalDateTime)
 
@@ -242,19 +245,19 @@ private fun calcDurationWithoutWeekends(startLocalDateTime: LocalDateTime, endLo
         start,
         LocalDateTime.of(LocalDate.of(start.year, start.month, start.dayOfMonth), LocalTime.of(WORK_END_TIME, 0))
     )
-    
+
     val lastDayDuration = Duration.between(
         LocalDateTime.of(
             LocalDate.of(stop.year, stop.month, stop.dayOfMonth),
             LocalTime.of(WORK_START_TIME, 0)
         ), stop
     )
-    
+
     var countWeekdays: Long = 0
     var firstMomentOfSomeDay = firstMomentOfDayAfterStart
     while (firstMomentOfSomeDay.toLocalDate().isBefore(stop.toLocalDate())) {
         val dayOfWeek = firstMomentOfSomeDay.dayOfWeek
-        
+
         if (!dayOfWeek.equals(DayOfWeek.SATURDAY) && !dayOfWeek.equals(DayOfWeek.SUNDAY)) countWeekdays++
         // Set up the next loop.
         firstMomentOfSomeDay = firstMomentOfSomeDay.plusDays(1)
@@ -306,26 +309,30 @@ data class ContributorStats(
     val wasRequestedReviews: Int
 )
 
-private fun handleOpenPrAnalysis(repo: GHRepository, PRPullLimit: Int, outputType: String) {
-    if (outputType.equals(TEXT_OUTPUT_TYPE, ignoreCase = true)) println("Open PRs\nWorking...")
+private fun handleOpenPrAnalysis(reposAndPullRequestsLimits: List<Pair<String, Int>>, outputType: String) {
+    reposAndPullRequestsLimits.map { (repoName, prPullLimit) ->
+        if (outputType.equals(TEXT_OUTPUT_TYPE, ignoreCase = true))
+            println("Open PRs for repo: $repoName - Pull Request Pull Limit: $prPullLimit\nWorking...")
 
-    val openPRs = repo.queryPullRequests().state(GHIssueState.OPEN).list().take(PRPullLimit)
-    if (outputType.equals(JSON_OUTPUT_TYPE, ignoreCase = true)) {
-        val json = JsonMapper.writeValueAsString(openPRs.map {
-            mapOf(
-                "number" to it.number,
-                "title" to it.title,
-                "createdAt" to it.createdAt.toInstant().atZone(ZoneOffset.UTC).toEpochSecond()
-            )
-        })
-        println(json)
-    } else {
-        openPRs.forEach {
-            val openDuration = calcDurationWithoutWeekends(
-                it.createdAt.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime(),
-                LocalDateTime.now(ZoneId.systemDefault())
-            )
-            println("PR: ${it.number} ${it.title} has been open for ${openDuration.toDays()} days, ${openDuration.toHoursPart()} hours.")
+        val repo = getGithubRepo(repoName)
+        val openPRs = repo.queryPullRequests().state(GHIssueState.OPEN).list().take(prPullLimit)
+        if (outputType.equals(JSON_OUTPUT_TYPE, ignoreCase = true)) {
+            val json = JsonMapper.writeValueAsString(openPRs.map {
+                mapOf(
+                    "number" to it.number,
+                    "title" to it.title,
+                    "createdAt" to it.createdAt.toInstant().atZone(ZoneOffset.UTC).toEpochSecond()
+                )
+            })
+            println(json)
+        } else {
+            openPRs.forEach {
+                val openDuration = calcDurationWithoutWeekends(
+                    it.createdAt.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime(),
+                    LocalDateTime.now(ZoneId.systemDefault())
+                )
+                println("PR: ${it.number} ${it.title} has been open for ${openDuration.toDays()} days, ${openDuration.toHoursPart()} hours.")
+            }
         }
     }
 }
@@ -343,13 +350,13 @@ fun main(args: Array<String>) {
         fullName = "pr-limit",
         shortName = "l",
         description = "Limit the amount of PRs to analyze."
-    ).default(10)
-    val repositoryName by parser.option(
+    ).default(10).multiple()
+    val repositoryNames by parser.option(
         ArgType.String,
         fullName = "repo-name",
         shortName = "r",
         description = "The repository to analyze (user must have read permission)."
-    ).required()
+    ).required().multiple()
     val outputType by parser.option(
         ArgType.String,
         fullName = "output",
@@ -383,15 +390,21 @@ fun main(args: Array<String>) {
         throw RuntimeException("--output parameter must be of value ${ALLOWED_OUTPUT_TYPES}")
     }
 
+    val reposAndPullRequestsLimits = when (pullRequestPullLimit.size) {
+        1 -> repositoryNames.map { it to pullRequestPullLimit.first() }
+        repositoryNames.size -> repositoryNames.zip(pullRequestPullLimit)
+        else ->
+            throw RuntimeException("'pr-limit' option must have a single provided argument or must the length of the 'repo-name' option.")
+    }
+
     if (analysisType.equals(CODE_REVIEW_REPORT_TYPE, ignoreCase = true)) {
         if (ticketsInReport == null)
             throw RuntimeException("--tickets can not be empty when doing a Code Review Report printout.")
-        getCodeReviewReportInfo(ticketsInReport!!.split(","), pullRequestPullLimit, repositoryName, outputType)
+        getCodeReviewReportInfo(ticketsInReport!!.split(","), reposAndPullRequestsLimits, outputType)
     } else {
         analyze(
             prType = analysisType,
-            prPullLimit = pullRequestPullLimit,
-            repoName = repositoryName,
+            reposAndPullRequestsLimits = reposAndPullRequestsLimits,
             outputType = outputType,
             includeIndividualStats = includeIndividualStats,
             inclusionLabels = inclusionLabels?.split(",") ?: emptyList()
