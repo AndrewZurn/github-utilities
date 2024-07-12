@@ -20,3 +20,9 @@ Example - Print in JSON
 ```
 github-utilities/dist> ./github-utilities --output json --analyze open --pr-limit 5 --repo-name <your-repo-name>
 ```
+
+Example - Analyze Multiple Repos with short-commands, individual statistics and a Not Before Date 
+(due to only being able to provide a limit to the Github library)
+```
+github-utilities/dist> ./github-utilities -a merged -i -r <your-repo-name> -l 20 -r <your-repo-name> -l 50 -nb 2024-06-24
+```
