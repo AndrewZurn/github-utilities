@@ -27,13 +27,20 @@ private val JsonMapper = jacksonObjectMapper()
 fun analyze(
     prType: String,
     reposAndPullRequestsLimits: List<Pair<String, Int>>,
+    notBeforeLimit: Instant?,
     outputType: String,
     includeIndividualStats: Boolean,
     inclusionLabels: List<String> = emptyList()) {
     if (prType.equals(OPEN_PR_TYPE, ignoreCase = true)) {
         handleOpenPrAnalysis(reposAndPullRequestsLimits, outputType)
     } else {
-        handleMergedPrAnalysis(reposAndPullRequestsLimits, outputType, includeIndividualStats, inclusionLabels)
+        handleMergedPrAnalysis(
+            reposAndPullRequestsLimits,
+            notBeforeLimit,
+            outputType,
+            includeIndividualStats,
+            inclusionLabels
+        )
     }
 }
 
@@ -103,6 +110,7 @@ private fun getCodeReviewReportInfo(
 
 private fun handleMergedPrAnalysis(
     reposAndPullRequestsLimits: List<Pair<String, Int>>,
+    notBeforeLimit: Instant?,
     outputType: String,
     includeIndividualStats: Boolean,
     inclusionLabels: List<String> = emptyList()
@@ -120,6 +128,7 @@ private fun handleMergedPrAnalysis(
             .take(prPullLimit)
         val mergedPRs = closedPrs
             .filter { it.isMerged }
+            .filter { it.mergedAt.toInstant().isAfter(notBeforeLimit) }
             // .filter { it.labels.map { label -> label.name }.contains("exclude-from-analysis").not() }
             // .filter { it.labels.map { label -> label.name }.any { labelName -> inclusionLabels.contains(labelName) } }
 
@@ -341,9 +350,19 @@ class GithubPrAnalyzer : CliktCommand() {
         .help("Analyze PR Type - $ALLOWED_ANALYSIS_TYPES")
     private val pullRequestPullLimit: List<Int> by option("-l", "--pr-limit")
         .int()
-        .multiple(listOf(10))
+        .multiple(listOf(30))
         .help("Limit the amount of PRs to analyze (default 10). Can be a list, where each " +
             "item will be used to limit querying of the repo name at the matching index in the repo-name list.")
+    private val notBeforeLimit: String? by option("-nb", "--not-before")
+        .help("The date in which PRs that were merged before should not be included in analysis.")
+        .check("Must be a valid ISO8601 date (yyyy-MM-dd)") {
+            try {
+                LocalDate.parse(it)
+            } catch (e: Throwable) {
+                return@check false
+            }
+            return@check true
+        }
     private val repositoryNames: List<String> by option("-r", "--repo-name")
         .multiple()
         .help("The repository to analyze (user must have read permission). Can be a list.")
@@ -363,7 +382,7 @@ class GithubPrAnalyzer : CliktCommand() {
         get() = """
             Example options to analyze multiple PRs with individual contributor statistics.
             
-            -a merged -i -r <ORG>/<REPO_1> -l <REPO_1_LIMIT> -r <ORG>/<REPO_2> -l <REPO_2_LIMIT>
+            -a merged -i -r <ORG>/<REPO_1> -l <REPO_1_LIMIT> -r <ORG>/<REPO_2> -l <REPO_2_LIMIT> -nb 2024-07-20
         """.trimIndent()
 
     override fun run() {
@@ -381,6 +400,9 @@ class GithubPrAnalyzer : CliktCommand() {
                 throw RuntimeException("'pr-limit' option must have a single provided argument or must the length of the 'repo-name' option.")
         }
 
+        val notBeforeDateLimit: Instant? = notBeforeLimit
+            ?.let { LocalDate.parse(it).atStartOfDay(ZoneOffset.UTC).toInstant() }
+
         if (analysisType.equals(CODE_REVIEW_REPORT_TYPE, ignoreCase = true)) {
             if (ticketsInReport == null)
                 throw RuntimeException("--tickets can not be empty when doing a Code Review Report printout.")
@@ -389,6 +411,7 @@ class GithubPrAnalyzer : CliktCommand() {
             analyze(
                 prType = analysisType,
                 reposAndPullRequestsLimits = reposAndPullRequestsLimits,
+                notBeforeLimit = notBeforeDateLimit,
                 outputType = outputType,
                 includeIndividualStats = includeIndividualStats,
                 inclusionLabels = inclusionLabels?.split(",") ?: emptyList()
