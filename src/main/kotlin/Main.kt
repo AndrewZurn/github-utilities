@@ -41,7 +41,6 @@ fun analyze(
     notBeforeLimit: Instant?,
     outputType: String,
     includeIndividualStats: Boolean,
-    inclusionLabels: List<String> = emptyList(),
 ) {
     if (prType.equals(OPEN_PR_TYPE, ignoreCase = true)) {
         handleOpenPrAnalysis(reposAndPullRequestsLimits, outputType)
@@ -51,7 +50,6 @@ fun analyze(
             notBeforeLimit,
             outputType,
             includeIndividualStats,
-            inclusionLabels,
         )
     }
 }
@@ -478,7 +476,7 @@ class GithubPrAnalyzer : CliktCommand() {
             if (ticketsInReport == null) {
                 throw RuntimeException("--tickets can not be empty when doing a Code Review Report printout.")
             }
-            getCodeReviewReportInfo(ticketsInReport!!.split(","), reposAndPullRequestsLimits, outputType)
+            getCodeReviewReportInfo(ticketsInReport!!.split(","), reposAndPullRequestsLimits)
         } else {
             analyze(
                 prType = analysisType,
@@ -486,7 +484,6 @@ class GithubPrAnalyzer : CliktCommand() {
                 notBeforeLimit = notBeforeDateLimit,
                 outputType = outputType,
                 includeIndividualStats = includeIndividualStats,
-                inclusionLabels = inclusionLabels?.split(",") ?: emptyList(),
             )
         }
     }
