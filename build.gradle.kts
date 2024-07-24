@@ -1,4 +1,5 @@
 plugins {
+    id("org.jlleitschuh.gradle.ktlint") version "12.1.1"
     kotlin("jvm") version "1.9.24"
     application
 }
@@ -47,7 +48,7 @@ val jar by tasks.getting(Jar::class) {
 tasks.register<Copy>("packageDistribution") {
     dependsOn("jar")
     from("${project.rootDir}/scripts/github-utilities")
-    from("${project.projectDir}/build/libs/${project.name}-${version}.jar") {
+    from("${project.projectDir}/build/libs/${project.name}-$version.jar") {
         into("lib")
     }
     into("${project.rootDir}/dist")
